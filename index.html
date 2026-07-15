@@ -184,24 +184,58 @@
   function setNotFound(msg){ status.style.color="#7dd3fc"; status.textContent=msg||"No existe un documento para los datos ingresados."; panel.innerHTML=""; }
   function setFound(msg){ status.style.color="#7af0b0"; status.textContent=msg||"Documento valido y vigente"; }
 
-  function renderFound(payload, code){
-    var fileUrl = payload.url || payload.dataUrl || "";
+  function blobToDataUrl(blob){
+    return new Promise(function(resolve,reject){
+      var reader = new FileReader();
+      reader.onload = function(){ resolve(String(reader.result||"")); };
+      reader.onerror = function(){ reject(new Error("No fue posible convertir el archivo a base64.")); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function remoteUrlToDataUrl(url){
+    var response = await fetch(url, {
+      method: "GET",
+      mode: "cors",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer"
+    });
+    if(!response.ok) throw new Error("No fue posible obtener el documento remoto.");
+    var blob = await response.blob();
+    return blobToDataUrl(blob);
+  }
+
+  async function renderFound(payload, code){
+    var sourceUrl = payload.url || "";
+    var fileUrl = payload.dataUrl || "";
+    var downloadUrl = "";
     var fileName = payload.name || ("documento-"+code+".pdf");
+    if(!fileUrl && sourceUrl){
+      try {
+        fileUrl = await remoteUrlToDataUrl(sourceUrl);
+      } catch(err){
+        console.warn("No se pudo convertir la vista previa a base64:", err);
+      }
+    }
+    downloadUrl = fileUrl || sourceUrl || "";
     var lower = String(fileUrl).toLowerCase();
     var preview = "";
     if(fileUrl){
       if(lower.endsWith(".pdf") || fileUrl.indexOf("data:application/pdf")===0){
-        preview = '<iframe src="'+esc(fileUrl)+'" style="width:100%;height:340px;border:0;border-radius:6px;background:#fff"></iframe>';
+        preview = '<iframe src="'+esc(fileUrl)+'#toolbar=0&navpanes=0&scrollbar=0" style="display:block;width:100%;height:520px;border:1px solid #dbe4ee;border-radius:6px;background:#fff"></iframe>';
       } else if(/\.(jpg|jpeg|png|gif|webp|svg)$/.test(lower) || fileUrl.indexOf("data:image/")===0){
-        preview = '<img src="'+esc(fileUrl)+'" alt="Documento" style="width:100%;max-height:340px;object-fit:contain;border-radius:6px;background:#fff"/>';
+        preview = '<img src="'+esc(fileUrl)+'" alt="Documento" draggable="false" style="width:100%;max-height:340px;object-fit:contain;border-radius:6px;background:#fff;user-select:none;-webkit-user-drag:none"/>';
       }
+    } else {
+      preview = '<div style="padding:10px;background:#f5f7fa;border-radius:6px;color:#111;">Vista previa protegida no disponible.</div>';
     }
     panel.innerHTML = [
-      '<div style="background:#fff;border-radius:8px;padding:10px;display:inline-block;max-width:100%;">',
+      '<div style="background:#fff;border-radius:8px;padding:10px;display:block;width:100%;max-width:920px;margin:0 auto;" oncontextmenu="return false;">',
       '<div style="margin-bottom:8px;font-weight:700;color:#111;word-break:break-word;">'+esc(fileName)+'</div>',
       preview,
       '<div style="margin-top:10px;text-align:center;">',
-      '<a href="'+esc(fileUrl)+'" download="'+esc(fileName)+'" style="display:inline-block;background:#00a55e;color:#fff;padding:8px 12px;border-radius:6px;text-decoration:none;font-weight:700;">Descargar</a>',
+      '<a href="'+esc(downloadUrl)+'" download="'+esc(fileName)+'" style="display:inline-block;background:#00a55e;color:#fff;padding:8px 12px;border-radius:6px;text-decoration:none;font-weight:700;">Descargar</a>',
       '</div>',
       '</div>'
     ].join('');
@@ -239,7 +273,7 @@
       var foundPayload = extractFoundPayload(data);
       if(foundPayload){
         setFound("Documento valido y vigente");
-        renderFound(foundPayload, code);
+        await renderFound(foundPayload, code);
       } else if(isNotFoundPayload(data)){
         setNotFound(data.message || data.mensaje || "No existe un documento para los datos ingresados.");
       } else {
